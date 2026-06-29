@@ -7,7 +7,7 @@
 ![n8n](https://img.shields.io/badge/n8n-Automation-orange?style=for-the-badge)
 ![OpenRouter](https://img.shields.io/badge/OpenRouter-AI-blue?style=for-the-badge)
 ![Instagram](https://img.shields.io/badge/Instagram-API-E4405F?style=for-the-badge&logo=instagram&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-success?style=for-the-badge)
+
 
 An intelligent automation workflow that instantly replies to Instagram comments, starts AI-powered conversations in Direct Messages, follows up with potential customers, and helps businesses generate leads 24/7.
 
