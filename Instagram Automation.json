@@ -1,0 +1,749 @@
+{
+  "name": "AI Social Media Lead Generation System",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// In n8n, webhook GET query params are in input.query\nconst query = input.query || {};\n\nconst mode = (query['hub.mode'] || '').toString();\nconst token = (query['hub.verify_token'] || '').toString();\nconst challenge = (query['hub.challenge'] || '').toString();\n\nconst VERIFY_TOKEN = 'YOUR_VERIFY_TOKEN';\n\nreturn [{\n  json: {\n    verified: (\n      mode === 'subscribe' &&\n      token === VERIFY_TOKEN\n    ),\n    challenge: challenge\n  }\n}];"
+      },
+      "id": "76132b98-e915-4bfc-af6e-3839ef8ef337",
+      "name": "Verify Hub Challenge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5440, 4720]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "type-check",
+              "leftValue": "={{ $json.body?.entry?.[0]?.changes ? 'comment' : ($json.body?.entry?.[0]?.messaging ? 'dm' : 'unknown') }}",
+              "rightValue": "comment",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "173ff4eb-7e7b-4b0b-bf1e-fd5a2f25f2d9",
+      "name": "Comment or DM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [5440, 4944]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.commentId }}/replies",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_PAGE_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"message\": \"Thanks for your comment! Check DM 📩\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "959aa764-ede1-4389-b6e8-11945e9dc505",
+      "name": "Auto Reply to Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5808, 4928],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet aiText = '';\n\ntry {\n  // chainLlm typically returns {text: '...'} or {output: '...'}\n  if (item.text && typeof item.text === 'string' && item.text.trim()) {\n    aiText = item.text.trim();\n  } else if (item.output && typeof item.output === 'string' && item.output.trim()) {\n    aiText = item.output.trim();\n  } else if (item.response && typeof item.response === 'string' && item.response.trim()) {\n    aiText = item.response.trim();\n  } else if (item.message && item.message.content) {\n    aiText = item.message.content.toString().trim();\n  } else if (item.choices && Array.isArray(item.choices) && item.choices[0] && item.choices[0].message) {\n    aiText = item.choices[0].message.content.toString().trim();\n  } else if (typeof item === 'string') {\n    aiText = item.trim();\n  }\n} catch(e) {\n  aiText = '';\n}\n\n// Strip any accidental markdown\naiText = aiText.replace(/```[\\s\\S]*?```/g, '').trim();\n\n// Enforce safe fallback\nif (!aiText || aiText.length < 2) {\n  aiText = 'Thanks for reaching out! How can I assist you today? 😊';\n}\n\n// Truncate to safe Instagram DM limit (1000 chars)\nif (aiText.length > 1000) {\n  aiText = aiText.substring(0, 997) + '...';\n}\n\nlet prevData;\ntry {\n  prevData = $('Normalize Data').first().json;\n} catch(e) {\n  prevData = {};\n}\n\nreturn [{\n  json: {\n    type: prevData.type || 'dm',\n    username: prevData.username || '',\n    user_id: prevData.user_id || '',\n    message: prevData.message || '',\n    post_id: prevData.post_id || '',\n    page_id: prevData.page_id || '',\n    timestamp: prevData.timestamp || new Date().toISOString(),\n    normalized_at: prevData.normalized_at || new Date().toISOString(),\n    chatbot_reply: aiText\n  }\n}];"
+      },
+      "id": "95be2d71-7145-47a0-b8d4-dcaa17bf43fe",
+      "name": "Parse Chatbot Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [6240, 5216]
+    },
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "path": "instagram-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "abb1c9f6-a1d7-4411-a7d4-8494298a0b5b",
+      "name": "Instagram Webhook GET1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [5120, 4736],
+      "webhookId": "YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "63e3177b-5e74-46f2-a0be-629afe671c64",
+      "name": "Respond With Challenge1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [5936, 4608]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a friendly Instagram sales chatbot for a business.\n\nRules:\n- Reply naturally and concisely (max 3 sentences)\n- Be helpful and empathetic\n- If user asks about pricing, give a brief helpful answer and ask if they want more details\n- If user asks about demo, collect their name and contact info\n- If user shows buying intent, guide them to the next step\n- Always end with a question to keep the conversation going\n- Do NOT use markdown in your reply\n- Do NOT include excessive emojis\n- Keep response under 150 words\n\nConversation context:\nUserid: {{ $json.body.entry[0].messaging[0].sender.id }}\nUser message: {{ $json.body.entry[0].messaging[0].message.text }}\n\nRespond naturally as the business chatbot:",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [5824, 5216],
+      "id": "81dbde58-d2dd-435f-b9e0-ea054658c803",
+      "name": "AI Chatbot Response1"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b:free",
+        "options": {
+          "maxTokens": 200,
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [5840, 5408],
+      "id": "55ecd697-f718-4060-a5b8-b2979885ff25",
+      "name": "OpenRouter Chat Model3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "82c88e13-4af6-4faa-bb95-412482322053",
+              "leftValue": "={{ $json.verified }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [5664, 4720],
+      "id": "cca8066e-657f-47ee-900e-9742770290f8",
+      "name": "Is verified1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v24.0/{{ $('Instagram Webhook GET1').item.json.body.entry[0].messaging[0].recipient.id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_INSTAGRAM_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": {\n    \"id\": \"{{ $('Instagram Webhook GET1').item.json.body.entry[0].messaging[0].sender.id }}\"\n  },\n  \"message\": {\n    \"text\": \"{{ $json.chatbot_reply }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [6528, 5168],
+      "id": "014161c9-7660-43db-a25f-784ebefb5346",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the official Instagram DM assistant for Truptech (https://www.truptech.com/), a technology solutions company.\n\nYour job is to generate a short, natural DM message to send to a user who just commented on an Instagram post.\n\nContext:\n- User commented: \"{{ $('Instagram Webhook GET1').item.json.body.entry[0].changes[0].value.text }}\"\n- Username: \"{{ $('Instagram Webhook GET1').item.json.body.entry[0].changes[0].value.from.username }}\"\n\nRules:\n- Keep message friendly, human, and conversational\n- Do NOT sound robotic or salesy\n- Keep it under 2–3 sentences\n- Acknowledge their comment briefly\n- Offer help or ask a follow-up question\n- Do NOT use markdown or formatting\n- Do NOT repeat the comment exactly\n- End with a question to continue the conversation\n\nIf the comment is about pricing → ask what service they need details for  \nIf the comment is about interest → offer help and ask requirement  \nIf unclear → ask how you can help them\n\nReturn ONLY the DM text.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [6032, 4928],
+      "id": "0a0bd323-2f8e-4265-a5b7-b8d445e16388",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b:free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [6016, 5072],
+      "id": "5f641452-2797-42e9-8d87-5bd0b3bf0c3a",
+      "name": "OpenRouter Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "const value = $json.body.entry?.[0]?.changes?.[0]?.value;\n\nreturn [{\n  json: {\n    commentId: value?.id,\n    userId: value?.from?.id,\n    username: value?.from?.username,\n    text: value?.text\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5632, 4928],
+      "id": "d1a47ae9-5c63-4a7a-a54d-1bad3c3af6e1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/YOUR_PAGE_ID/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_PAGE_ACCESS_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": {\n    \"id\": \"{{ $('Code in JavaScript1').item.json.userId }}\"\n  },\n  \"message\": {\n    \"text\": \"{{ $json.text }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [5680, 6464],
+      "id": "cc631f9d-d3af-4d2a-a286-53ee568bd0e4",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// In n8n, webhook GET query params are in input.query\nconst query = input.query || {};\n\nconst mode = (query['hub.mode'] || '').toString();\nconst token = (query['hub.verify_token'] || '').toString();\nconst challenge = (query['hub.challenge'] || '').toString();\n\nconst VERIFY_TOKEN = 'YOUR_VERIFY_TOKEN';\n\nreturn [{\n  json: {\n    verified: (\n      mode === 'subscribe' &&\n      token === VERIFY_TOKEN\n    ),\n    challenge: challenge\n  }\n}];"
+      },
+      "id": "ec1ea0db-91ef-4e7a-ac70-0fd49befca0a",
+      "name": "Verify Hub Challenge1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4752, 6256]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "type-check",
+              "leftValue": "={{ $json.body?.entry?.[0]?.changes ? 'comment' : ($json.body?.entry?.[0]?.messaging ? 'dm' : 'unknown') }}",
+              "rightValue": "comment",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "da7c610f-f35b-47e9-bb2b-4e031f013d76",
+      "name": "Comment or DM?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [4752, 6480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.commentId }}/replies",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_PAGE_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"message\": \"Thanks for your comment! Check DM 📩\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "3ea2e004-7d38-4268-a2de-243bb3881347",
+      "name": "Auto Reply to Comment1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5120, 6464],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet aiText = '';\n\ntry {\n  // chainLlm typically returns {text: '...'} or {output: '...'}\n  if (item.text && typeof item.text === 'string' && item.text.trim()) {\n    aiText = item.text.trim();\n  } else if (item.output && typeof item.output === 'string' && item.output.trim()) {\n    aiText = item.output.trim();\n  } else if (item.response && typeof item.response === 'string' && item.response.trim()) {\n    aiText = item.response.trim();\n  } else if (item.message && item.message.content) {\n    aiText = item.message.content.toString().trim();\n  } else if (item.choices && Array.isArray(item.choices) && item.choices[0] && item.choices[0].message) {\n    aiText = item.choices[0].message.content.toString().trim();\n  } else if (typeof item === 'string') {\n    aiText = item.trim();\n  }\n} catch(e) {\n  aiText = '';\n}\n\n// Strip any accidental markdown\naiText = aiText.replace(/```[\\s\\S]*?```/g, '').trim();\n\n// Enforce safe fallback\nif (!aiText || aiText.length < 2) {\n  aiText = 'Thanks for reaching out! How can I assist you today? 😊';\n}\n\n// Truncate to safe Instagram DM limit (1000 chars)\nif (aiText.length > 1000) {\n  aiText = aiText.substring(0, 997) + '...';\n}\n\nlet prevData;\ntry {\n  prevData = $('Normalize Data').first().json;\n} catch(e) {\n  prevData = {};\n}\n\nreturn [{\n  json: {\n    type: prevData.type || 'dm',\n    username: prevData.username || '',\n    user_id: prevData.user_id || '',\n    message: prevData.message || '',\n    post_id: prevData.post_id || '',\n    page_id: prevData.page_id || '',\n    timestamp: prevData.timestamp || new Date().toISOString(),\n    normalized_at: prevData.normalized_at || new Date().toISOString(),\n    chatbot_reply: aiText\n  }\n}];"
+      },
+      "id": "2f5446da-e370-497a-948b-ba744cf20799",
+      "name": "Parse Chatbot Reply1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5552, 6752]
+    },
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "path": "instagram-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "41a20763-d711-464a-86a6-c939e9ddedfb",
+      "name": "Instagram Webhook GET",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [4432, 6272],
+      "webhookId": "YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.challenge }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "3ddbe2a2-0a76-49c2-8a26-f904b0958154",
+      "name": "Respond With Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [5248, 6144]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a friendly Instagram sales chatbot for a business.\n\nRules:\n- Reply naturally and concisely (max 3 sentences)\n- Be helpful and empathetic\n- If user asks about pricing, give a brief helpful answer and ask if they want more details\n- If user asks about demo, collect their name and contact info\n- If user shows buying intent, guide them to the next step\n- Always end with a question to keep the conversation going\n- Do NOT use markdown in your reply\n- Do NOT include excessive emojis\n- Keep response under 150 words\n\nConversation context:\nUserid: {{ $json.body.entry[0].messaging[0].sender.id }}\nUser message: {{ $json.body.entry[0].messaging[0].message.text }}\n\nRespond naturally as the business chatbot:",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [5136, 6752],
+      "id": "24ed7c45-86ef-4d02-a6d5-1f714e1f5655",
+      "name": "AI Chatbot Response"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b:free",
+        "options": {
+          "maxTokens": 200,
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [5136, 6944],
+      "id": "37c9d8df-4275-45a5-b943-027c020a7037",
+      "name": "OpenRouter Chat Model4"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "82c88e13-4af6-4faa-bb95-412482322053",
+              "leftValue": "={{ $json.verified }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [4976, 6256],
+      "id": "5ec5991d-3809-4b80-8333-c303a4e4d2b0",
+      "name": "Is verified"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v24.0/{{ $('Instagram Webhook GET').item.json.body.entry[0].messaging[0].recipient.id }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_INSTAGRAM_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": {\n    \"id\": \"{{ $('Instagram Webhook GET').item.json.body.entry[0].messaging[0].sender.id }}\"\n  },\n  \"message\": {\n    \"text\": \"{{ $json.chatbot_reply }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [5840, 6704],
+      "id": "dc373895-9fe6-4cd6-b442-e009c66e667f",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are the official Instagram DM assistant for Truptech (https://www.truptech.com/), a technology solutions company.\n\nYour job is to generate a short, natural DM message to send to a user who just commented on an Instagram post.\n\nContext:\n- User commented: \"{{ $('Instagram Webhook GET').item.json.body.entry[0].changes[0].value.text }}\"\n- Username: \"{{ $('Instagram Webhook GET').item.json.body.entry[0].changes[0].value.from.username }}\"\n\nRules:\n- Keep message friendly, human, and conversational\n- Do NOT sound robotic or salesy\n- Keep it under 2–3 sentences\n- Acknowledge their comment briefly\n- Offer help or ask a follow-up question\n- Do NOT use markdown or formatting\n- Do NOT repeat the comment exactly\n- End with a question to continue the conversation\n\nIf the comment is about pricing → ask what service they need details for  \nIf the comment is about interest → offer help and ask requirement  \nIf unclear → ask how you can help them\n\nReturn ONLY the DM text.",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [5328, 6464],
+      "id": "3d3c963c-842c-4f31-87fb-35c6837d2940",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b:free",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [5328, 6608],
+      "id": "57b63ac6-0c54-4c64-8dd5-dd14b7fc6d55",
+      "name": "OpenRouter Chat Model1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const value = $json.body.entry?.[0]?.changes?.[0]?.value;\n\nreturn [{\n  json: {\n    commentId: value?.id,\n    userId: value?.from?.id,\n    username: value?.from?.username,\n    text: value?.text\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4944, 6464],
+      "id": "8dbf2682-39fc-44f2-93ad-a216347cd05f",
+      "name": "Code in JavaScript1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Verify Hub Challenge": {
+      "main": [
+        [
+          {
+            "node": "Is verified1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comment or DM?": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Chatbot Response1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Reply to Comment": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Chatbot Reply": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Webhook GET1": {
+      "main": [
+        [
+          {
+            "node": "Verify Hub Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comment or DM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Chatbot Response1": {
+      "main": [
+        [
+          {
+            "node": "Parse Chatbot Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Chatbot Response1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is verified1": {
+      "main": [
+        [
+          {
+            "node": "Respond With Challenge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        []
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Auto Reply to Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Hub Challenge1": {
+      "main": [
+        [
+          {
+            "node": "Is verified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comment or DM?1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Chatbot Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto Reply to Comment1": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Chatbot Reply1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Webhook GET": {
+      "main": [
+        [
+          {
+            "node": "Verify Hub Challenge1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Comment or DM?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Chatbot Response": {
+      "main": [
+        [
+          {
+            "node": "Parse Chatbot Reply1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Chatbot Response",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is verified": {
+      "main": [
+        [
+          {
+            "node": "Respond With Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Auto Reply to Comment1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
